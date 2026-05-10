@@ -15,7 +15,7 @@ import * as coinflip from "./commands/coinflip.js";
 import * as rps from "./commands/rps.js";
 import * as mines from "./commands/mines.js";
 import * as towers from "./commands/towers.js";
-import * as ownerSettings from "./commands/owner-settings.js";
+import * as owner from "./commands/owner.js";
 import * as give from "./commands/give.js";
 import * as turnoff from "./commands/turnoff.js";
 import * as help from "./commands/help.js";
@@ -32,7 +32,7 @@ const commands: Command[] = [
   rps,
   mines,
   towers,
-  ownerSettings,
+  owner,
   give,
   turnoff,
   help,

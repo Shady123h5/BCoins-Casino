@@ -37,8 +37,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       {
         name: "🔒 Admin Only",
         value: [
-          "`/give [user] <amount>` — Give or remove BCoins",
-          "`/owner-settings` — View/change win probability",
+          "`/give <amount> [user]` — Give or remove BCoins",
+          "`/owner` — View/change casino win rate",
           "`/turnoff` — Force shut down the bot",
         ].join("\n"),
       },
