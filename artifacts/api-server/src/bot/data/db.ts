@@ -31,7 +31,7 @@ function saveDb(db: Database): void {
 export function getUser(userId: string): UserData {
   const db = loadDb();
   if (!db.users[userId]) {
-    db.users[userId] = { balance: 1000, totalWon: 0, totalLost: 0, gamesPlayed: 0 };
+    db.users[userId] = { balance: 0, totalWon: 0, totalLost: 0, gamesPlayed: 0 };
     saveDb(db);
   }
   return db.users[userId];
@@ -40,7 +40,7 @@ export function getUser(userId: string): UserData {
 export function setBalance(userId: string, amount: number): void {
   const db = loadDb();
   if (!db.users[userId]) {
-    db.users[userId] = { balance: 1000, totalWon: 0, totalLost: 0, gamesPlayed: 0 };
+    db.users[userId] = { balance: 0, totalWon: 0, totalLost: 0, gamesPlayed: 0 };
   }
   db.users[userId].balance = Math.max(0, Math.round(amount));
   saveDb(db);
@@ -49,7 +49,7 @@ export function setBalance(userId: string, amount: number): void {
 export function addBalance(userId: string, amount: number): number {
   const db = loadDb();
   if (!db.users[userId]) {
-    db.users[userId] = { balance: 1000, totalWon: 0, totalLost: 0, gamesPlayed: 0 };
+    db.users[userId] = { balance: 0, totalWon: 0, totalLost: 0, gamesPlayed: 0 };
   }
   db.users[userId].balance = Math.max(0, Math.round(db.users[userId].balance + amount));
   if (amount > 0) {

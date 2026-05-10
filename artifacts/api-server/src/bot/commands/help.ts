@@ -19,8 +19,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       {
         name: "💰 Economy",
         value: [
-          "`/balance` — Check your balance",
-          "`/daily` — Claim 500 free BCoins daily",
+          "`/balance` — Check your or someone else's balance",
           "`/leaderboard` — Top BCoins holders",
         ].join("\n"),
       },
@@ -36,10 +35,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         ].join("\n"),
       },
       {
-        name: "⚙️ Owner",
+        name: "🔒 Admin Only",
         value: [
+          "`/give [user] <amount>` — Give or remove BCoins",
           "`/owner-settings` — View/change win probability",
-          "`/give` — Grant or remove BCoins",
+          "`/turnoff` — Force shut down the bot",
         ].join("\n"),
       },
       {

@@ -10,7 +10,6 @@ import {
 import { logger } from "../lib/logger.js";
 
 import * as balance from "./commands/balance.js";
-import * as daily from "./commands/daily.js";
 import * as leaderboard from "./commands/leaderboard.js";
 import * as coinflip from "./commands/coinflip.js";
 import * as rps from "./commands/rps.js";
@@ -18,6 +17,7 @@ import * as mines from "./commands/mines.js";
 import * as towers from "./commands/towers.js";
 import * as ownerSettings from "./commands/owner-settings.js";
 import * as give from "./commands/give.js";
+import * as turnoff from "./commands/turnoff.js";
 import * as help from "./commands/help.js";
 
 interface Command {
@@ -27,7 +27,6 @@ interface Command {
 
 const commands: Command[] = [
   balance,
-  daily,
   leaderboard,
   coinflip,
   rps,
@@ -35,12 +34,26 @@ const commands: Command[] = [
   towers,
   ownerSettings,
   give,
+  turnoff,
   help,
 ];
 
 const commandCollection = new Collection<string, Command>();
 for (const cmd of commands) {
   commandCollection.set(cmd.data.name, cmd);
+}
+
+function startKeepAlive(): void {
+  const port = process.env["PORT"] ?? "8080";
+  const url = `http://localhost:${port}/api/healthz`;
+
+  setInterval(() => {
+    fetch(url).catch(() => {
+      logger.warn("Keep-alive ping failed — server may be restarting");
+    });
+  }, 30_000);
+
+  logger.info({ url }, "Keep-alive ping started (every 30s)");
 }
 
 export async function startBot(): Promise<void> {
@@ -69,6 +82,8 @@ export async function startBot(): Promise<void> {
     } catch (err) {
       logger.error({ err }, "Failed to register slash commands");
     }
+
+    startKeepAlive();
   });
 
   client.on("interactionCreate", async (interaction) => {

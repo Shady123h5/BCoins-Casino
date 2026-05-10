@@ -1,0 +1,20 @@
+name: Keep-Alive Ping
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping bot server
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.BOT_URL }}/api/healthz" --max-time 10 || echo "000")
+          echo "Status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "Warning: server returned $STATUS"
+          else
+            echo "Bot is alive!"
+          fi
