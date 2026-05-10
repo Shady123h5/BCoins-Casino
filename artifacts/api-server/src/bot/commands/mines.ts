@@ -29,6 +29,8 @@ export const data = new SlashCommandBuilder()
   );
 
 // 4 rows × 5 cols = 20 tiles → 4 grid action rows + 1 cashout row = 5 max ✓
+// Using setEmoji() only (no label text) so Discord renders every button as
+// an identical-sized square — this is what keeps the grid aligned.
 function buildGridComponents(userId: string): ActionRowBuilder<ButtonBuilder>[] {
   const game = activeMinesGames.get(userId);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
@@ -38,46 +40,51 @@ function buildGridComponents(userId: string): ActionRowBuilder<ButtonBuilder>[] 
     for (let col = 0; col < GRID_COLS; col++) {
       const i = row * GRID_COLS + col;
       const revealed = game?.revealed[i] ?? false;
-      const isMine = game?.grid[i] ?? false;
+      const isMine   = game?.grid[i]     ?? false;
+      const alive    = game?.alive       ?? false;
 
-      let style = ButtonStyle.Secondary;
-      let label = "⬜";
-      const disabled = revealed || !game?.alive;
+      let style: ButtonStyle;
+      let emoji: string;
 
-      if (revealed) {
-        style = isMine ? ButtonStyle.Danger : ButtonStyle.Success;
-        label = isMine ? "💥" : "💎";
+      if (!revealed) {
+        style = ButtonStyle.Secondary;
+        emoji = "⬛";
+      } else if (isMine) {
+        style = ButtonStyle.Danger;
+        emoji = "💥";
+      } else {
+        style = ButtonStyle.Success;
+        emoji = "💎";
       }
 
       actionRow.addComponents(
         new ButtonBuilder()
           .setCustomId(`mine_${i}`)
-          .setLabel(label)
+          .setEmoji(emoji)           // emoji only → uniform square buttons
           .setStyle(style)
-          .setDisabled(disabled),
+          .setDisabled(revealed || !alive),
       );
     }
     rows.push(actionRow);
   }
 
-  // Row 5: cashout button
-  const game2 = activeMinesGames.get(userId);
-  const canCashout = (game2?.safeRevealed ?? 0) > 0 && game2?.alive;
+  // Row 5: cashout — text label is fine here (single full-width row)
+  const canCashout = (game?.safeRevealed ?? 0) > 0 && (game?.alive ?? false);
   const mult = canCashout
-    ? getMinesMultiplier(game2!.safeRevealed, game2!.mineCount)
+    ? getMinesMultiplier(game!.safeRevealed, game!.mineCount)
     : 1;
 
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId("mines_cashout")
-        .setLabel(canCashout ? `💰 Cash Out  ×${mult.toFixed(2)}` : "💰 Cash Out")
+        .setLabel(canCashout ? `💰  Cash Out   ×${mult.toFixed(2)}` : "💰  Cash Out")
         .setStyle(ButtonStyle.Success)
         .setDisabled(!canCashout),
     ),
   );
 
-  return rows; // exactly 5 rows total
+  return rows; // exactly 5 rows total ✓
 }
 
 function difficultySelectRow(): ActionRowBuilder<ButtonBuilder> {

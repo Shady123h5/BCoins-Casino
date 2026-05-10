@@ -1,10 +1,10 @@
 {
   "users": {
     "1403396831433723996": {
-      "balance": 400,
+      "balance": 190,
       "totalWon": 500,
-      "totalLost": 1200,
-      "gamesPlayed": 2
+      "totalLost": 1410,
+      "gamesPlayed": 5
     }
   },
   "winProbability": 0.5
