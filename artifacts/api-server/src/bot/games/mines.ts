@@ -1,73 +1,88 @@
 import { getWinProbability } from "../data/db.js";
 
+// 4 rows × 5 cols = 20 tiles → 4 grid rows + 1 cashout row = 5 total (Discord limit)
+export const GRID_COLS = 5;
+export const GRID_ROWS = 4;
+export const GRID_SIZE = GRID_COLS * GRID_ROWS; // 20
+
+export type MinesDifficulty = "easy" | "medium" | "hard";
+
+export const DIFFICULTY_CONFIG: Record<MinesDifficulty, { mines: number; label: string; emoji: string }> = {
+  easy:   { mines: 3, label: "Easy",   emoji: "🟢" },
+  medium: { mines: 5, label: "Medium", emoji: "🟡" },
+  hard:   { mines: 7, label: "Hard",   emoji: "🔴" },
+};
+
 export interface MinesGame {
   grid: boolean[];
   revealed: boolean[];
   mineCount: number;
+  difficulty: MinesDifficulty;
   safeRevealed: number;
   alive: boolean;
   bet: number;
   userId: string;
 }
 
-const GRID_SIZE = 25;
-
 export const activeMinesGames = new Map<string, MinesGame>();
 
-export function startMinesGame(userId: string, bet: number, mineCount: number): MinesGame {
+export function startMinesGame(
+  userId: string,
+  bet: number,
+  difficulty: MinesDifficulty,
+): MinesGame {
+  const { mines } = DIFFICULTY_CONFIG[difficulty];
   const grid: boolean[] = Array(GRID_SIZE).fill(false);
-  const minePositions = new Set<number>();
-  while (minePositions.size < mineCount) {
-    minePositions.add(Math.floor(Math.random() * GRID_SIZE));
+  const positions = new Set<number>();
+  while (positions.size < mines) {
+    positions.add(Math.floor(Math.random() * GRID_SIZE));
   }
-  for (const pos of minePositions) {
-    grid[pos] = true;
-  }
+  for (const pos of positions) grid[pos] = true;
 
   const game: MinesGame = {
     grid,
     revealed: Array(GRID_SIZE).fill(false),
-    mineCount,
+    mineCount: mines,
+    difficulty,
     safeRevealed: 0,
     alive: true,
     bet,
     userId,
   };
-
   activeMinesGames.set(userId, game);
   return game;
 }
 
-export function revealCell(userId: string, index: number): {
-  hit: boolean;
-  game: MinesGame;
-} {
+export function revealCell(
+  userId: string,
+  index: number,
+): { hit: boolean; game: MinesGame } {
   const game = activeMinesGames.get(userId);
   if (!game || !game.alive) throw new Error("No active game");
-  if (game.revealed[index]) throw new Error("Cell already revealed");
+  if (game.revealed[index]) throw new Error("Already revealed");
 
+  // Rigging: only applies when win_probability != 0.5
+  // At 0.5 the game is 100% fair per the grid layout
   const winProb = getWinProbability();
-
   let hit = game.grid[index];
 
-  if (!hit && Math.random() > winProb) {
-    const safeCells = game.grid
-      .map((isMine, i) => (!isMine && !game.revealed[i] ? i : -1))
-      .filter((i) => i !== -1 && i !== index);
-    if (safeCells.length > 0 && game.safeRevealed > 0) {
-      hit = Math.random() < (1 - winProb) * 0.4;
+  if (!hit && winProb < 0.5) {
+    // House-favored: small chance a safe cell becomes a mine
+    const rigChance = (0.5 - winProb) * 0.3;
+    if (Math.random() < rigChance && game.safeRevealed > 0) {
+      hit = true;
+      game.grid[index] = true;
     }
   }
 
+  game.revealed[index] = true;
+
   if (hit) {
-    game.grid[index] = true;
-    game.revealed[index] = true;
     game.alive = false;
     activeMinesGames.set(userId, game);
     return { hit: true, game };
   }
 
-  game.revealed[index] = true;
   game.safeRevealed += 1;
   activeMinesGames.set(userId, game);
   return { hit: false, game };
@@ -75,42 +90,29 @@ export function revealCell(userId: string, index: number): {
 
 export function cashoutMines(userId: string): { payout: number; multiplier: number } {
   const game = activeMinesGames.get(userId);
-  if (!game || !game.alive) throw new Error("No active game");
+  if (!game || !game.alive || game.safeRevealed === 0)
+    throw new Error("Cannot cash out");
 
   const multiplier = getMinesMultiplier(game.safeRevealed, game.mineCount);
   const payout = Math.round(game.bet * multiplier);
-
   game.alive = false;
   activeMinesGames.set(userId, game);
-
   return { payout, multiplier };
 }
 
+// Stake-accurate formula: C(N,k)/C(N-M,k) × 0.99 house edge
+// = ∏(i=0 to k-1) [(N-i)/(N-M-i)] × 0.99
 export function getMinesMultiplier(safeRevealed: number, mineCount: number): number {
   if (safeRevealed === 0) return 1;
-  const safeTotal = GRID_SIZE - mineCount;
+  const N = GRID_SIZE; // 20
+  const M = mineCount;
   let multiplier = 1;
   for (let i = 0; i < safeRevealed; i++) {
-    multiplier *= (safeTotal - i) / (GRID_SIZE - mineCount - i);
+    multiplier *= (N - i) / (N - M - i);
   }
-  return Math.max(1, parseFloat((multiplier * 0.97).toFixed(2)));
+  return Math.max(1.01, parseFloat((multiplier * 0.99).toFixed(2)));
 }
 
-export function renderMinesGrid(game: MinesGame, revealAll = false): string {
-  const rows: string[] = [];
-  for (let row = 0; row < 5; row++) {
-    const cols: string[] = [];
-    for (let col = 0; col < 5; col++) {
-      const i = row * 5 + col;
-      if (revealAll) {
-        cols.push(game.grid[i] ? "💣" : "💎");
-      } else if (game.revealed[i]) {
-        cols.push(game.grid[i] ? "💥" : "✅");
-      } else {
-        cols.push("⬛");
-      }
-    }
-    rows.push(cols.join(" "));
-  }
-  return rows.join("\n");
+export function clearGame(userId: string): void {
+  activeMinesGames.delete(userId);
 }
