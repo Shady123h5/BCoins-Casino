@@ -1,9 +1,9 @@
-name: BCoins Casino Bot — 24/7 (No-PAT)
+name: BCoins Casino Bot — 24/7 (Final-Fix)
 
 on:
   workflow_dispatch:
   schedule:
-    # Fires every 5 hours
+    # Runs every 5 hours to maintain 24/7 coverage
     - cron: "0 */5 * * *"
 
 jobs:
@@ -36,38 +36,45 @@ jobs:
       - name: Build bot
         run: pnpm --filter @workspace/api-server run build
 
-      - name: Run bot with Auto-Discovery
+      - name: Run bot with Protected Auto-Discovery
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           OWNER_SECRET_KEY: ${{ secrets.OWNER_SECRET_KEY }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           PORT: "8080"
         run: |
-          # 1. Automatically find the entry point (index.cjs or index.js in a dist folder)
-          BOT_PATH=$(find . -path "*/dist/index.cjs" -o -path "*/dist/index.js" | head -n 1)
+          # 1. Locate the entry point while ignoring node_modules and library files
+          # This looks for index.js or index.cjs specifically within your project's dist folders
+          BOT_PATH=$(find . -not -path "*/node_modules/*" \( -path "*/dist/index.cjs" -o -path "*/dist/index.js" \) | head -n 1)
           
           if [ -z "$BOT_PATH" ]; then
-            echo "!!! ERROR: Could not locate the built bot file. Check your build output."
+            echo "!!! ERROR: Bot executable not found in any dist folder."
+            echo "==> Debug: Current directory structure:"
+            ls -R | grep ":$" | sed -e 's/:$//' -e 's/[^-][^\/]*\//--/g' -e 's/^/   /'
             exit 1
           fi
           
           echo "==> Found bot executable at: $BOT_PATH"
 
-          # 2. Start the 5-hour loop
+          # 2. 5-hour 10-minute loop (18600 seconds)
           END=$(($(date +%s) + 18600))
           
           while [ "$(date +%s)" -lt "$END" ]; do
             echo "==> [$(date -u)] Starting bot..."
             
-            # Run the discovered bot file
-            node "$BOT_PATH" || echo "==> Bot exited with error"
+            # Start the bot
+            node "$BOT_PATH" || echo "==> Bot exited (checking for restart...)"
             
+            # Restart logic
             REMAINING=$(( END - $(date +%s) ))
             if [ "$REMAINING" -gt 5 ]; then
-              echo "==> Restarting in 5 seconds..."
+              echo "==> Restarting in 5 seconds... ($REMAININGs left in window)"
               sleep 5
+            else
+              break
             fi
           done
+          echo "==> Time window finished. Handing over to the next scheduled run."
 
       - name: Save bot data
         if: always()
@@ -77,6 +84,8 @@ jobs:
           git pull --rebase origin main || true
           git add bcoin-data.json || true
           if ! git diff --staged --quiet; then
-            git commit -m "chore: update bcoin data [skip ci]"
+            git commit -m "chore: persist bot data [skip ci]"
             git push origin main
+          else
+            echo "No data changes detected."
           fi
