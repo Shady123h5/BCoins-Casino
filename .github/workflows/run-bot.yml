@@ -1,13 +1,11 @@
 name: BCoins Casino Bot — 24/7
 
 on:
-  # Triggered by the keepalive watchdog and self-trigger
   repository_dispatch:
     types: [start-bot]
-  # Manual start from the Actions tab
   workflow_dispatch:
-  # Hard fallback — fires every 6 h even if everything else fails
   schedule:
+    # Hard fallback every 6 h — fires even if self-trigger and keepalive both fail
     - cron: "0 */6 * * *"
 
 jobs:
@@ -18,7 +16,7 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout (pulls latest bcoin-data.json)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: main
@@ -39,25 +37,38 @@ jobs:
       - name: Build bot
         run: pnpm --filter @workspace/api-server run build
 
-      - name: Run bot (5 h 45 min, then stop cleanly)
+      - name: Run bot with auto-restart (5 h 45 min window)
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           OWNER_SECRET_KEY: ${{ secrets.OWNER_SECRET_KEY }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           PORT: "8080"
-        # timeout exits 124 → || true makes the step pass so data is always saved
-        run: timeout 20700 node artifacts/api-server/dist/index.cjs || true
+        # Restart loop: if the bot crashes for ANY reason it comes back within 5s.
+        # The loop exits after 5 h 45 min so the job ends cleanly before GitHub's 6 h limit.
+        run: |
+          END=$(($(date +%s) + 20700))
+          while [ "$(date +%s)" -lt "$END" ]; do
+            echo "==> [$(date -u)] Starting bot..."
+            node artifacts/api-server/dist/index.cjs || echo "==> Bot exited (code $?)"
+            REMAINING=$(( END - $(date +%s) ))
+            echo "==> $REMAINING seconds remaining in this window."
+            if [ "$REMAINING" -gt 5 ]; then
+              echo "==> Restarting in 5 s..."
+              sleep 5
+            fi
+          done
+          echo "==> Time window elapsed. Handing off to next run."
 
-      - name: Self-trigger next run via repository_dispatch
+      - name: Trigger next run immediately
+        continue-on-error: true
         run: |
           curl -s -X POST \
             -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/dispatches" \
             -d '{"event_type":"start-bot"}'
-        continue-on-error: true   # keepalive.yml is the real safety net
 
-      - name: Save bot data back to repo
+      - name: Save bot data to repo
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

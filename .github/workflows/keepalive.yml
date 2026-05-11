@@ -2,8 +2,8 @@ name: Keepalive — Restart Bot if Down
 
 on:
   schedule:
-    # Runs every hour — checks if the bot is alive, fires it up if not
-    - cron: "0 * * * *"
+    # Check every 30 minutes — max downtime is 30 min if self-trigger fails
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check if bot is running, restart if not
+      - name: Restart bot if not running
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
@@ -19,12 +19,12 @@ jobs:
             -H "Authorization: token $GH_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/run-bot.yml/runs?status=in_progress&per_page=5" \
-            | python3 -c "import sys,json; data=json.load(sys.stdin); print(data['total_count'])")
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['total_count'])")
 
           echo "Active bot runs: $RUNNING"
 
           if [ "$RUNNING" -eq "0" ]; then
-            echo "Bot is DOWN — restarting via repository_dispatch..."
+            echo "Bot is DOWN — triggering restart..."
             curl -s -X POST \
               -H "Authorization: token $GH_TOKEN" \
               -H "Accept: application/vnd.github.v3+json" \
@@ -32,5 +32,5 @@ jobs:
               -d '{"event_type":"start-bot"}'
             echo "Restart triggered."
           else
-            echo "Bot is running. All good."
+            echo "Bot is alive. Nothing to do."
           fi
