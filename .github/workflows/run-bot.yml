@@ -1,19 +1,18 @@
-name: BCoins Casino Bot — 24/7
+name: BCoins Casino Bot — 24/7 (No-PAT)
 
 on:
-  repository_dispatch:
-    types: [start-bot]
   workflow_dispatch:
   schedule:
-    # Hard fallback every 6 h — fires even if self-trigger and keepalive both fail
-    - cron: "0 */6 * * *"
+    # Fires every 5 hours. 
+    # This ensures a new runner starts before the old one timed out.
+    - cron: "0 */5 * * *"
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 360 # Max GitHub limit
     permissions:
-      contents: write
+      contents: write # Allows saving bcoin-data.json
 
     steps:
       - name: Checkout
@@ -25,6 +24,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: 'pnpm'
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -32,47 +32,38 @@ jobs:
           version: "9"
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile --ignore-scripts
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build bot
         run: pnpm --filter @workspace/api-server run build
 
-      - name: Run bot with auto-restart (5 h 45 min window)
+      - name: Run bot with overlap window
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           OWNER_SECRET_KEY: ${{ secrets.OWNER_SECRET_KEY }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           PORT: "8080"
-        # Restart loop: if the bot crashes for ANY reason it comes back within 5s.
-        # The loop exits after 5 h 45 min so the job ends cleanly before GitHub's 6 h limit.
         run: |
-          END=$(($(date +%s) + 20700))
+          # Run for 5 hours and 15 minutes (315 minutes).
+          # Since the cron fires every 5 hours, there is a 15-minute 
+          # period where the new bot and old bot are both running.
+          END=$(($(date +%s) + 18900))
+          
           while [ "$(date +%s)" -lt "$END" ]; do
-            echo "==> [$(date -u)] Starting bot..."
-            node artifacts/api-server/dist/index.cjs || echo "==> Bot exited (code $?)"
-            REMAINING=$(( END - $(date +%s) ))
-            echo "==> $REMAINING seconds remaining in this window."
-            if [ "$REMAINING" -gt 5 ]; then
-              echo "==> Restarting in 5 s..."
+            echo "==> Starting bot..."
+            node artifacts/api-server/dist/index.cjs || echo "==> Bot crashed"
+            
+            if [ "$(date +%s)" -lt "$END" ]; then
+              echo "==> Restarting in 5s..."
               sleep 5
             fi
           done
-          echo "==> Time window elapsed. Handing off to next run."
 
-      - name: Trigger next run immediately
-        continue-on-error: true
+      - name: Save bot data
+        if: always()
         run: |
-          curl -s -X POST \
-            -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/dispatches" \
-            -d '{"event_type":"start-bot"}'
-
-      - name: Save bot data to repo
-        run: |
-          git config user.name  "github-actions[bot]"
+          git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main 2>/dev/null || true
-          git add bcoin-data.json 2>/dev/null || true
-          git diff --staged --quiet || git commit -m "chore: persist bot data [skip ci]"
-          git push || true
+          git add bcoin-data.json || true
+          git commit -m "chore: persist bot data [skip ci]" || exit 0
+          git push origin main
