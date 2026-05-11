@@ -18,235 +18,200 @@ export const data = new SlashCommandBuilder()
       .setName("bot")
       .setDescription("Flip a coin against the bot")
       .addIntegerOption((opt) =>
-        opt
-          .setName("amount")
-          .setDescription("Amount to bet")
-          .setRequired(true)
-          .setMinValue(1),
+        opt.setName("amount").setDescription("Amount to bet").setRequired(true).setMinValue(1),
       )
       .addStringOption((opt) =>
         opt
           .setName("side")
           .setDescription("Heads or Tails")
           .setRequired(true)
-          .addChoices(
-            { name: "Heads", value: "heads" },
-            { name: "Tails", value: "tails" },
-          ),
+          .addChoices({ name: "Heads", value: "heads" }, { name: "Tails", value: "tails" }),
       ),
   )
   .addSubcommand((sub) =>
     sub
-      .setName("player")
-      .setDescription("Challenge another player to coinflip")
-      .addUserOption((opt) =>
-        opt.setName("user").setDescription("User to challenge").setRequired(true),
-      )
+      .setName("open")
+      .setDescription("Post an open coinflip — anyone in the server can join")
       .addIntegerOption((opt) =>
+        opt.setName("amount").setDescription("Amount to bet").setRequired(true).setMinValue(1),
+      )
+      .addStringOption((opt) =>
         opt
-          .setName("amount")
-          .setDescription("Amount to bet")
+          .setName("side")
+          .setDescription("Your side (heads or tails)")
           .setRequired(true)
-          .setMinValue(1),
+          .addChoices({ name: "🪙 Heads", value: "heads" }, { name: "🌑 Tails", value: "tails" }),
       ),
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand();
 
+  // ── VS BOT ────────────────────────────────────────────────────────────────
   if (sub === "bot") {
     const amount = interaction.options.getInteger("amount", true);
-    const side = interaction.options.getString("side", true) as CoinSide;
-    const user = getUser(interaction.user.id);
+    const side   = interaction.options.getString("side", true) as CoinSide;
+    const user   = getUser(interaction.user.id);
 
     if (user.balance < amount) {
       return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xe74c3c)
-            .setTitle("❌ Insufficient Funds")
-            .setDescription(
-              `You only have **${user.balance.toLocaleString()} BCoins**.`,
-            ),
-        ],
+        embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("❌ Insufficient Funds")
+          .setDescription(`You only have **${user.balance.toLocaleString()} BCoins**.`)],
         ephemeral: true,
       });
     }
 
     const { result, won } = playCoinflipVsBot(side);
     const resultEmoji = result === "heads" ? "🪙 Heads" : "🌑 Tails";
-    const choiceEmoji = side === "heads" ? "🪙 Heads" : "🌑 Tails";
+    const choiceEmoji = side   === "heads" ? "🪙 Heads" : "🌑 Tails";
+    const newBalance  = addBalance(interaction.user.id, won ? amount : -amount);
 
-    let newBalance: number;
-    if (won) {
-      newBalance = addBalance(interaction.user.id, amount);
-    } else {
-      newBalance = addBalance(interaction.user.id, -amount);
-    }
-
-    const embed = new EmbedBuilder()
-      .setColor(won ? 0x2ecc71 : 0xe74c3c)
-      .setTitle(won ? "🎉 You Won!" : "💸 You Lost!")
-      .addFields(
-        { name: "Your Pick", value: choiceEmoji, inline: true },
-        { name: "Result", value: resultEmoji, inline: true },
-        { name: "\u200b", value: "\u200b", inline: true },
-        {
-          name: won ? "Winnings" : "Lost",
-          value: `${won ? "+" : "-"}${amount.toLocaleString()} BCoins`,
-          inline: true,
-        },
-        {
-          name: "New Balance",
-          value: `${newBalance.toLocaleString()} BCoins`,
-          inline: true,
-        },
-      )
-      .setFooter({ text: "BCoins Casino • /cf" })
-      .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(won ? 0x2ecc71 : 0xe74c3c)
+          .setTitle(won ? "🎉 You Won!" : "💸 You Lost!")
+          .addFields(
+            { name: "Your Pick",   value: choiceEmoji,                                           inline: true },
+            { name: "Result",      value: resultEmoji,                                           inline: true },
+            { name: "\u200b",      value: "\u200b",                                              inline: true },
+            { name: won ? "Winnings" : "Lost", value: `${won ? "+" : "-"}${amount.toLocaleString()} BCoins`, inline: true },
+            { name: "New Balance", value: `${newBalance.toLocaleString()} BCoins`,               inline: true },
+          )
+          .setFooter({ text: "BCoins Casino • /cf bot" })
+          .setTimestamp(),
+      ],
+    });
   }
 
-  if (sub === "player") {
-    const target = interaction.options.getUser("user", true);
-    const amount = interaction.options.getInteger("amount", true);
+  // ── OPEN (anyone can join) ────────────────────────────────────────────────
+  if (sub === "open") {
+    const amount      = interaction.options.getInteger("amount", true);
+    const side        = interaction.options.getString("side", true) as CoinSide;
+    const creatorId   = interaction.user.id;
+    const sideEmoji   = side === "heads" ? "🪙 Heads" : "🌑 Tails";
+    const oppEmoji    = side === "heads" ? "🌑 Tails" : "🪙 Heads";
 
-    if (target.id === interaction.user.id) {
+    const creator = getUser(creatorId);
+    if (creator.balance < amount) {
       return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xe74c3c)
-            .setTitle("❌ Invalid Challenge")
-            .setDescription("You cannot challenge yourself."),
-        ],
-        ephemeral: true,
-      });
-    }
-    if (target.bot) {
-      return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xe74c3c)
-            .setTitle("❌ Invalid Challenge")
-            .setDescription("You cannot challenge a bot."),
-        ],
+        embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("❌ Insufficient Funds")
+          .setDescription(`You only have **${creator.balance.toLocaleString()} BCoins**.`)],
         ephemeral: true,
       });
     }
 
-    const challenger = getUser(interaction.user.id);
-    if (challenger.balance < amount) {
-      return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xe74c3c)
-            .setTitle("❌ Insufficient Funds")
-            .setDescription(
-              `You only have **${challenger.balance.toLocaleString()} BCoins**.`,
-            ),
-        ],
-        ephemeral: true,
-      });
-    }
-
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    const joinRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
-        .setCustomId("cf_accept")
-        .setLabel("Accept")
-        .setStyle(ButtonStyle.Success)
-        .setEmoji("✅"),
+        .setCustomId("cf_join")
+        .setLabel("⚔️  Join Game")
+        .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
-        .setCustomId("cf_decline")
-        .setLabel("Decline")
-        .setStyle(ButtonStyle.Danger)
-        .setEmoji("❌"),
+        .setCustomId("cf_cancel")
+        .setLabel("Cancel")
+        .setStyle(ButtonStyle.Secondary),
     );
 
-    const challengeEmbed = new EmbedBuilder()
+    const openEmbed = new EmbedBuilder()
       .setColor(0xf5c518)
-      .setTitle("🪙 Coinflip Challenge!")
+      .setTitle("🪙 Open Coinflip")
       .setDescription(
-        `<@${interaction.user.id}> challenges <@${target.id}> to a coinflip!\n\nBet: **${amount.toLocaleString()} BCoins**`,
+        `<@${creatorId}> wants to flip a coin!\n\n` +
+        `Bet: **${amount.toLocaleString()} BCoins**\n` +
+        `<@${creatorId}> is on **${sideEmoji}** — joiner gets **${oppEmoji}**\n\n` +
+        `Click **⚔️ Join Game** to accept!`,
       )
-      .setFooter({ text: "You have 60 seconds to accept or decline." });
+      .setFooter({ text: "Open for 2 minutes • BCoins Casino" });
 
     const msg = await interaction.reply({
-      content: `<@${target.id}>`,
-      embeds: [challengeEmbed],
-      components: [row],
+      embeds: [openEmbed],
+      components: [joinRow],
       fetchReply: true,
     });
 
     const collector = msg.createMessageComponentCollector({
       componentType: ComponentType.Button,
-      time: 60000,
-      filter: (i) => i.user.id === target.id,
+      time: 120_000,
     });
 
-    collector.on("collect", async (btnInteraction) => {
-      if (btnInteraction.customId === "cf_decline") {
-        await btnInteraction.update({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(0xe74c3c)
-              .setTitle("❌ Challenge Declined")
-              .setDescription(`<@${target.id}> declined the coinflip.`),
-          ],
+    let settled = false;
+
+    collector.on("collect", async (btn) => {
+      if (settled) return;
+
+      // Creator can cancel
+      if (btn.customId === "cf_cancel") {
+        if (btn.user.id !== creatorId) {
+          await btn.reply({ content: "Only the creator can cancel.", ephemeral: true });
+          return;
+        }
+        settled = true;
+        collector.stop("cancel");
+        await btn.update({
+          embeds: [new EmbedBuilder().setColor(0x95a5a6).setTitle("🚫 Game Cancelled")
+            .setDescription(`<@${creatorId}> cancelled the coinflip.`)],
           components: [],
         });
         return;
       }
 
-      const targetUser = getUser(target.id);
-      if (targetUser.balance < amount) {
-        await btnInteraction.update({
+      // Join button
+      if (btn.customId === "cf_join") {
+        if (btn.user.id === creatorId) {
+          await btn.reply({ content: "You can't join your own game.", ephemeral: true });
+          return;
+        }
+
+        const joiner = getUser(btn.user.id);
+        if (joiner.balance < amount) {
+          await btn.reply({
+            embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("❌ Insufficient Funds")
+              .setDescription(`You only have **${joiner.balance.toLocaleString()} BCoins**.`)],
+            ephemeral: true,
+          });
+          return;
+        }
+
+        settled = true;
+        collector.stop("played");
+
+        // Deduct both, run flip
+        const result  = playCoinflipPvP(); // "heads" or "tails"
+        const creatorWon = result === side;
+        const winnerId   = creatorWon ? creatorId : btn.user.id;
+        const loserId    = creatorWon ? btn.user.id : creatorId;
+        const resultEmoji = result === "heads" ? "🪙 Heads" : "🌑 Tails";
+
+        addBalance(winnerId, amount);
+        addBalance(loserId, -amount);
+        const winnerBal = getUser(winnerId).balance;
+
+        await btn.update({
           embeds: [
             new EmbedBuilder()
-              .setColor(0xe74c3c)
-              .setTitle("❌ Insufficient Funds")
+              .setColor(0x2ecc71)
+              .setTitle(`${resultEmoji}!`)
               .setDescription(
-                `<@${target.id}> doesn't have enough BCoins.`,
-              ),
+                `<@${winnerId}> wins **${amount.toLocaleString()} BCoins**!\n` +
+                `New balance: **${winnerBal.toLocaleString()} BCoins**`,
+              )
+              .addFields(
+                { name: `<@${creatorId}>`, value: sideEmoji,  inline: true },
+                { name: `<@${btn.user.id}>`, value: oppEmoji, inline: true },
+              )
+              .setFooter({ text: "BCoins Casino • Open Coinflip" })
+              .setTimestamp(),
           ],
           components: [],
         });
-        return;
       }
-
-      const result = playCoinflipPvP();
-      const winner = result === "heads" ? interaction.user.id : target.id;
-      const loser = result === "heads" ? target.id : interaction.user.id;
-
-      addBalance(winner, amount);
-      addBalance(loser, -amount);
-
-      const winnerBalance = getUser(winner).balance;
-
-      await btnInteraction.update({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0x2ecc71)
-            .setTitle(`${result === "heads" ? "🪙 Heads" : "🌑 Tails"}!`)
-            .setDescription(
-              `<@${winner}> wins **${amount.toLocaleString()} BCoins**!\n\nNew balance: **${winnerBalance.toLocaleString()} BCoins**`,
-            )
-            .setFooter({ text: "BCoins Casino • PvP Coinflip" })
-            .setTimestamp(),
-        ],
-        components: [],
-      });
     });
 
     collector.on("end", async (_, reason) => {
       if (reason === "time") {
         await interaction.editReply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(0x95a5a6)
-              .setTitle("⌛ Challenge Expired")
-              .setDescription("The coinflip challenge was not accepted in time."),
-          ],
+          embeds: [new EmbedBuilder().setColor(0x95a5a6).setTitle("⌛ No One Joined")
+            .setDescription("The coinflip expired with no challenger.")],
           components: [],
         });
       }

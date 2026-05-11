@@ -2,20 +2,23 @@ name: BCoins Casino Bot — 24/7
 
 on:
   schedule:
-    # Fallback safety net — restarts even if self-trigger somehow fails
-    - cron: "0 */5 * * *"
+    # Safety-net cron — fires every 6 h in case self-trigger fails
+    - cron: "0 */6 * * *"
   workflow_dispatch: # manual start from the Actions tab
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     permissions:
-      contents: write   # commit bcoin-data.json back
-      actions: write    # trigger the next run before this one dies
+      contents: write
+      actions: write
 
     steps:
-      - name: Checkout
+      - name: Checkout (pulls latest bcoin-data.json)
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -34,25 +37,29 @@ jobs:
       - name: Build
         run: pnpm --filter @workspace/api-server run build
 
-      - name: Run bot (4 h 50 min, then graceful stop)
+      - name: Run bot (5 h 45 min then stop cleanly)
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           OWNER_SECRET_KEY: ${{ secrets.OWNER_SECRET_KEY }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           PORT: "8080"
-        # timeout exits 124 — treat as success so next steps always run
-        run: timeout 17400 node artifacts/api-server/dist/index.cjs || true
+        # timeout exits 124 → treat as success so next steps always run
+        run: timeout 20700 node artifacts/api-server/dist/index.cjs || true
 
-      - name: Trigger next run (keeps the bot alive with zero gap)
+      - name: Trigger next run immediately (needs PAT_TOKEN secret)
+        continue-on-error: true   # falls back to cron if PAT_TOKEN not set
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          gh workflow run run-bot.yml --repo "${{ github.repository }}"
+          gh workflow run run-bot.yml \
+            --repo "${{ github.repository }}" \
+            --ref main
 
-      - name: Persist bot data to repo
+      - name: Save bot data back to repo
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main 2>/dev/null || true
           git add bcoin-data.json 2>/dev/null || true
           git diff --staged --quiet || git commit -m "chore: persist bot data [skip ci]"
           git push || true

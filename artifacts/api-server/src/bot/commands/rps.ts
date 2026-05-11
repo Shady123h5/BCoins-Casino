@@ -10,7 +10,16 @@ import {
 import { getUser, addBalance } from "../data/db.js";
 import { playRPSVsBot, playRPSPvP, rpsEmoji, type RPSChoice } from "../games/rps.js";
 
-const pendingRPS = new Map<string, { choice: RPSChoice; amount: number; challengerId: string }>();
+// Open games waiting for a joiner:  messageId → { creatorId, creatorChoice, amount }
+const openGames = new Map<string, { creatorId: string; creatorChoice: RPSChoice; amount: number }>();
+
+function moveRow(): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("rps_rock").setLabel("🪨 Rock").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("rps_paper").setLabel("📄 Paper").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("rps_scissors").setLabel("✂️ Scissors").setStyle(ButtonStyle.Secondary),
+  );
+}
 
 export const data = new SlashCommandBuilder()
   .setName("rps")
@@ -25,8 +34,8 @@ export const data = new SlashCommandBuilder()
           .setDescription("Your choice")
           .setRequired(true)
           .addChoices(
-            { name: "🪨 Rock", value: "rock" },
-            { name: "📄 Paper", value: "paper" },
+            { name: "🪨 Rock",     value: "rock"     },
+            { name: "📄 Paper",    value: "paper"    },
             { name: "✂️ Scissors", value: "scissors" },
           ),
       )
@@ -36,11 +45,8 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand((sub) =>
     sub
-      .setName("player")
-      .setDescription("Challenge another player to Rock Paper Scissors")
-      .addUserOption((opt) =>
-        opt.setName("user").setDescription("User to challenge").setRequired(true),
-      )
+      .setName("open")
+      .setDescription("Post an open RPS game — anyone in the server can join")
       .addIntegerOption((opt) =>
         opt.setName("amount").setDescription("Amount to bet").setRequired(true).setMinValue(1),
       ),
@@ -49,25 +55,21 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand();
 
+  // ── VS BOT ────────────────────────────────────────────────────────────────
   if (sub === "bot") {
     const choice = interaction.options.getString("choice", true) as RPSChoice;
     const amount = interaction.options.getInteger("amount", true);
-    const user = getUser(interaction.user.id);
+    const user   = getUser(interaction.user.id);
 
     if (user.balance < amount) {
       return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xe74c3c)
-            .setTitle("❌ Insufficient Funds")
-            .setDescription(`You only have **${user.balance.toLocaleString()} BCoins**.`),
-        ],
+        embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("❌ Insufficient Funds")
+          .setDescription(`You only have **${user.balance.toLocaleString()} BCoins**.`)],
         ephemeral: true,
       });
     }
 
     const { botChoice, result } = playRPSVsBot(choice);
-
     let newBalance: number;
     let resultTitle: string;
     let color: number;
@@ -86,200 +88,239 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       color = 0xf5c518;
     }
 
-    const embed = new EmbedBuilder()
-      .setColor(color)
-      .setTitle(resultTitle)
-      .addFields(
-        { name: "Your Choice", value: `${rpsEmoji[choice]} ${choice}`, inline: true },
-        { name: "Bot's Choice", value: `${rpsEmoji[botChoice]} ${botChoice}`, inline: true },
-        { name: "\u200b", value: "\u200b", inline: true },
-        {
-          name: result === "tie" ? "Bet Returned" : result === "win" ? "Winnings" : "Lost",
-          value: `${result === "loss" ? "-" : "+"}${amount.toLocaleString()} BCoins`,
-          inline: true,
-        },
-        { name: "New Balance", value: `${newBalance.toLocaleString()} BCoins`, inline: true },
-      )
-      .setFooter({ text: "BCoins Casino • /rps" })
-      .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(color)
+          .setTitle(resultTitle)
+          .addFields(
+            { name: "Your Choice", value: `${rpsEmoji[choice]} ${choice}`,     inline: true },
+            { name: "Bot's Choice", value: `${rpsEmoji[botChoice]} ${botChoice}`, inline: true },
+            { name: "\u200b", value: "\u200b", inline: true },
+            { name: result === "tie" ? "Bet Returned" : result === "win" ? "Winnings" : "Lost",
+              value: `${result === "loss" ? "-" : "+"}${amount.toLocaleString()} BCoins`, inline: true },
+            { name: "New Balance", value: `${newBalance.toLocaleString()} BCoins`, inline: true },
+          )
+          .setFooter({ text: "BCoins Casino • /rps bot" })
+          .setTimestamp(),
+      ],
+    });
   }
 
-  if (sub === "player") {
-    const target = interaction.options.getUser("user", true);
-    const amount = interaction.options.getInteger("amount", true);
+  // ── OPEN (anyone can join) ────────────────────────────────────────────────
+  if (sub === "open") {
+    const amount    = interaction.options.getInteger("amount", true);
+    const creatorId = interaction.user.id;
 
-    if (target.id === interaction.user.id || target.bot) {
+    const creator = getUser(creatorId);
+    if (creator.balance < amount) {
       return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xe74c3c)
-            .setTitle("❌ Invalid Challenge")
-            .setDescription("You cannot challenge yourself or a bot."),
-        ],
+        embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("❌ Insufficient Funds")
+          .setDescription(`You only have **${creator.balance.toLocaleString()} BCoins**.`)],
         ephemeral: true,
       });
     }
 
-    const challenger = getUser(interaction.user.id);
-    if (challenger.balance < amount) {
-      return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xe74c3c)
-            .setTitle("❌ Insufficient Funds")
-            .setDescription(`You only have **${challenger.balance.toLocaleString()} BCoins**.`),
-        ],
-        ephemeral: true,
-      });
-    }
-
-    const rpsRow = (label: string) =>
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId("rps_rock").setLabel("🪨 Rock").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("rps_paper").setLabel("📄 Paper").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("rps_scissors").setLabel("✂️ Scissors").setStyle(ButtonStyle.Secondary),
-      );
-
-    const challengeEmbed = new EmbedBuilder()
-      .setColor(0xf5c518)
-      .setTitle("✊ Rock Paper Scissors Challenge!")
-      .setDescription(
-        `<@${interaction.user.id}> challenges <@${target.id}>!\n\nBet: **${amount.toLocaleString()} BCoins**\n\nFirst, <@${interaction.user.id}> pick your move (secretly):`,
-      )
-      .setFooter({ text: "Both players choose in secret • BCoins Casino" });
-
-    const msg = await interaction.reply({
-      content: `<@${interaction.user.id}>`,
-      embeds: [challengeEmbed],
-      components: [rpsRow("challenger")],
-      fetchReply: true,
+    // Step 1: creator picks their move secretly (ephemeral)
+    await interaction.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf5c518)
+          .setTitle("✊ Pick Your Move")
+          .setDescription("Choose your move — only you can see this:"),
+      ],
+      components: [moveRow()],
+      ephemeral: true,
     });
 
-    const challengerCollector = msg.createMessageComponentCollector({
-      componentType: ComponentType.Button,
-      filter: (i) => i.user.id === interaction.user.id,
-      max: 1,
-      time: 30000,
-    });
+    let creatorChoice: RPSChoice | null = null;
+    let publicMsg: Awaited<ReturnType<typeof interaction.channel.send>> | null = null;
 
-    challengerCollector.on("collect", async (btn) => {
-      const challChoice = btn.customId.replace("rps_", "") as RPSChoice;
-      pendingRPS.set(interaction.id, {
-        choice: challChoice,
-        amount,
-        challengerId: interaction.user.id,
-      });
-
-      await btn.update({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xf5c518)
-            .setTitle("✊ RPS Challenge")
-            .setDescription(
-              `<@${interaction.user.id}> has made their choice!\n\nNow <@${target.id}>, pick your move:`,
-            ),
-        ],
-        components: [rpsRow("target")],
-      });
-
-      const targetCollector = msg.createMessageComponentCollector({
+    try {
+      const creatorPick = await interaction.channel!.awaitMessageComponent({
         componentType: ComponentType.Button,
-        filter: (i) => i.user.id === target.id,
-        max: 1,
-        time: 30000,
+        filter: (i) =>
+          i.user.id === creatorId &&
+          ["rps_rock", "rps_paper", "rps_scissors"].includes(i.customId),
+        time: 30_000,
       });
 
-      targetCollector.on("collect", async (tbtn) => {
-        const targetChoice = tbtn.customId.replace("rps_", "") as RPSChoice;
-        const pending = pendingRPS.get(interaction.id);
-        if (!pending) return;
-        pendingRPS.delete(interaction.id);
+      creatorChoice = creatorPick.customId.replace("rps_", "") as RPSChoice;
 
-        const targetUser = getUser(target.id);
-        if (targetUser.balance < amount) {
-          await tbtn.update({
-            embeds: [
-              new EmbedBuilder()
-                .setColor(0xe74c3c)
-                .setTitle("❌ Insufficient Funds")
-                .setDescription(`<@${target.id}> doesn't have enough BCoins.`),
-            ],
+      // Acknowledge the pick (ephemeral update)
+      await creatorPick.reply({
+        content: `Got it! You picked **${rpsEmoji[creatorChoice]} ${creatorChoice}**. Waiting for someone to join...`,
+        ephemeral: true,
+      });
+    } catch {
+      await interaction.editReply({
+        embeds: [new EmbedBuilder().setColor(0x95a5a6).setTitle("⌛ Timed Out")
+          .setDescription("You didn't pick a move in time.")],
+        components: [],
+      });
+      return;
+    }
+
+    // Step 2: post the public open-game card
+    const joinRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId("rps_join").setLabel("⚔️  Join Game").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("rps_cancel").setLabel("Cancel").setStyle(ButtonStyle.Secondary),
+    );
+
+    publicMsg = await interaction.channel!.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf5c518)
+          .setTitle("✊ Open RPS Game")
+          .setDescription(
+            `<@${creatorId}> is looking for an opponent!\n\n` +
+            `Bet: **${amount.toLocaleString()} BCoins**\n\n` +
+            `Click **⚔️ Join Game** to challenge them!`,
+          )
+          .setFooter({ text: "Open for 2 minutes • BCoins Casino" }),
+      ],
+      components: [joinRow],
+    });
+
+    openGames.set(publicMsg.id, { creatorId, creatorChoice, amount });
+
+    const collector = publicMsg.createMessageComponentCollector({
+      componentType: ComponentType.Button,
+      time: 120_000,
+    });
+
+    let settled = false;
+
+    collector.on("collect", async (btn) => {
+      if (settled) return;
+
+      // Cancel
+      if (btn.customId === "rps_cancel") {
+        if (btn.user.id !== creatorId) {
+          await btn.reply({ content: "Only the creator can cancel.", ephemeral: true });
+          return;
+        }
+        settled = true;
+        openGames.delete(publicMsg!.id);
+        collector.stop("cancel");
+        await btn.update({
+          embeds: [new EmbedBuilder().setColor(0x95a5a6).setTitle("🚫 Game Cancelled")
+            .setDescription(`<@${creatorId}> cancelled the RPS game.`)],
+          components: [],
+        });
+        return;
+      }
+
+      // Someone wants to join
+      if (btn.customId === "rps_join") {
+        if (btn.user.id === creatorId) {
+          await btn.reply({ content: "You can't join your own game.", ephemeral: true });
+          return;
+        }
+
+        const joiner = getUser(btn.user.id);
+        if (joiner.balance < amount) {
+          await btn.reply({
+            embeds: [new EmbedBuilder().setColor(0xe74c3c).setTitle("❌ Insufficient Funds")
+              .setDescription(`You only have **${joiner.balance.toLocaleString()} BCoins**.`)],
+            ephemeral: true,
+          });
+          return;
+        }
+
+        // Lock the game so no one else can join
+        settled = true;
+        openGames.delete(publicMsg!.id);
+        collector.stop("played");
+
+        // Disable join button while joiner picks
+        await btn.update({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xf5c518)
+              .setTitle("✊ Open RPS Game")
+              .setDescription(`<@${btn.user.id}> joined! Waiting for their move...`),
+          ],
+          components: [],
+        });
+
+        // Ask joiner for their move (ephemeral)
+        await btn.followUp({
+          embeds: [new EmbedBuilder().setColor(0xf5c518).setTitle("✊ Pick Your Move")
+            .setDescription("Choose your move — only you can see this:")],
+          components: [moveRow()],
+          ephemeral: true,
+        });
+
+        // Wait for joiner's pick
+        let joinerChoice: RPSChoice;
+        try {
+          const joinerPick = await interaction.channel!.awaitMessageComponent({
+            componentType: ComponentType.Button,
+            filter: (i) =>
+              i.user.id === btn.user.id &&
+              ["rps_rock", "rps_paper", "rps_scissors"].includes(i.customId),
+            time: 30_000,
+          });
+
+          joinerChoice = joinerPick.customId.replace("rps_", "") as RPSChoice;
+          await joinerPick.reply({ content: `Got it! **${rpsEmoji[joinerChoice]} ${joinerChoice}** locked in.`, ephemeral: true });
+        } catch {
+          // Joiner didn't pick — cancel
+          await publicMsg!.edit({
+            embeds: [new EmbedBuilder().setColor(0x95a5a6).setTitle("⌛ Timed Out")
+              .setDescription(`<@${btn.user.id}> didn't pick a move in time. Game cancelled.`)],
             components: [],
           });
           return;
         }
 
-        const result = playRPSPvP(pending.choice, targetChoice);
+        // Resolve
+        const result = playRPSPvP(creatorChoice!, joinerChoice);
         let description: string;
         let color: number;
 
         if (result === "tie") {
-          description = `It's a tie! No BCoins transferred.`;
+          description = "It's a **tie**! No BCoins transferred.";
           color = 0xf5c518;
         } else if (result === "win") {
-          addBalance(interaction.user.id, amount);
-          addBalance(target.id, -amount);
-          description = `<@${interaction.user.id}> wins **${amount.toLocaleString()} BCoins**!`;
+          addBalance(creatorId, amount);
+          addBalance(btn.user.id, -amount);
+          const bal = getUser(creatorId).balance;
+          description = `<@${creatorId}> wins **${amount.toLocaleString()} BCoins**!\nNew balance: **${bal.toLocaleString()} BCoins**`;
           color = 0x2ecc71;
         } else {
-          addBalance(target.id, amount);
-          addBalance(interaction.user.id, -amount);
-          description = `<@${target.id}> wins **${amount.toLocaleString()} BCoins**!`;
+          addBalance(btn.user.id, amount);
+          addBalance(creatorId, -amount);
+          const bal = getUser(btn.user.id).balance;
+          description = `<@${btn.user.id}> wins **${amount.toLocaleString()} BCoins**!\nNew balance: **${bal.toLocaleString()} BCoins**`;
           color = 0x2ecc71;
         }
 
-        await tbtn.update({
+        await publicMsg!.edit({
           embeds: [
             new EmbedBuilder()
               .setColor(color)
               .setTitle("✊ RPS Result")
               .setDescription(description)
               .addFields(
-                {
-                  name: `<@${interaction.user.id}>`,
-                  value: `${rpsEmoji[pending.choice]} ${pending.choice}`,
-                  inline: true,
-                },
-                {
-                  name: `<@${target.id}>`,
-                  value: `${rpsEmoji[targetChoice]} ${targetChoice}`,
-                  inline: true,
-                },
+                { name: `<@${creatorId}>`,    value: `${rpsEmoji[creatorChoice!]} ${creatorChoice}`, inline: true },
+                { name: `<@${btn.user.id}>`,  value: `${rpsEmoji[joinerChoice]} ${joinerChoice}`,   inline: true },
               )
-              .setFooter({ text: "BCoins Casino • PvP RPS" })
+              .setFooter({ text: "BCoins Casino • Open RPS" })
               .setTimestamp(),
           ],
           components: [],
         });
-      });
-
-      targetCollector.on("end", async (_, reason) => {
-        if (reason === "time") {
-          pendingRPS.delete(interaction.id);
-          await interaction.editReply({
-            embeds: [
-              new EmbedBuilder()
-                .setColor(0x95a5a6)
-                .setTitle("⌛ Challenge Expired")
-                .setDescription("The RPS challenge timed out."),
-            ],
-            components: [],
-          });
-        }
-      });
+      }
     });
 
-    challengerCollector.on("end", async (_, reason) => {
+    collector.on("end", async (_, reason) => {
       if (reason === "time") {
-        await interaction.editReply({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(0x95a5a6)
-              .setTitle("⌛ Challenge Expired")
-              .setDescription("The challenger did not pick in time."),
-          ],
+        openGames.delete(publicMsg!.id);
+        await publicMsg!.edit({
+          embeds: [new EmbedBuilder().setColor(0x95a5a6).setTitle("⌛ No One Joined")
+            .setDescription("The RPS game expired with no challenger.")],
           components: [],
         });
       }
