@@ -1,16 +1,17 @@
 import { getWinProbability } from "../data/db.js";
 
-// 4 rows × 5 cols = 20 tiles → 4 grid rows + 1 cashout row = 5 total (Discord limit)
-export const GRID_COLS = 5;
+// 4 rows × 3 cols = 12 tiles → 4 grid rows + 1 cashout row = 5 total (Discord limit ✓)
+// 3 buttons per row = uniform rendering on every Discord client / device
+export const GRID_COLS = 3;
 export const GRID_ROWS = 4;
-export const GRID_SIZE = GRID_COLS * GRID_ROWS; // 20
+export const GRID_SIZE = GRID_COLS * GRID_ROWS; // 12
 
 export type MinesDifficulty = "easy" | "medium" | "hard";
 
 export const DIFFICULTY_CONFIG: Record<MinesDifficulty, { mines: number; label: string; emoji: string }> = {
-  easy:   { mines: 3, label: "Easy",   emoji: "🟢" },
-  medium: { mines: 5, label: "Medium", emoji: "🟡" },
-  hard:   { mines: 7, label: "Hard",   emoji: "🔴" },
+  easy:   { mines: 2, label: "Easy",   emoji: "🟢" },
+  medium: { mines: 3, label: "Medium", emoji: "🟡" },
+  hard:   { mines: 5, label: "Hard",   emoji: "🔴" },
 };
 
 export interface MinesGame {
@@ -61,13 +62,10 @@ export function revealCell(
   if (!game || !game.alive) throw new Error("No active game");
   if (game.revealed[index]) throw new Error("Already revealed");
 
-  // Rigging: only applies when win_probability != 0.5
-  // At 0.5 the game is 100% fair per the grid layout
   const winProb = getWinProbability();
   let hit = game.grid[index];
 
   if (!hit && winProb < 0.5) {
-    // House-favored: small chance a safe cell becomes a mine
     const rigChance = (0.5 - winProb) * 0.3;
     if (Math.random() < rigChance && game.safeRevealed > 0) {
       hit = true;
@@ -100,11 +98,10 @@ export function cashoutMines(userId: string): { payout: number; multiplier: numb
   return { payout, multiplier };
 }
 
-// Stake-accurate formula: C(N,k)/C(N-M,k) × 0.99 house edge
-// = ∏(i=0 to k-1) [(N-i)/(N-M-i)] × 0.99
+// Stake-accurate formula: ∏(N-i)/(N-M-i) × 0.99 house edge
 export function getMinesMultiplier(safeRevealed: number, mineCount: number): number {
   if (safeRevealed === 0) return 1;
-  const N = GRID_SIZE; // 20
+  const N = GRID_SIZE; // 12
   const M = mineCount;
   let multiplier = 1;
   for (let i = 0; i < safeRevealed; i++) {

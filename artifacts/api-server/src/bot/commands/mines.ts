@@ -114,7 +114,7 @@ function gameEmbed(userId: string, bet: number, difficulty: MinesDifficulty): Em
   return new EmbedBuilder()
     .setColor(0xf5c518)
     .setTitle(`💣 Mines  —  ${cfg.emoji} ${cfg.label}`)
-    .setDescription(`**${cfg.mines} mines** hidden across 20 tiles. Click to reveal!\nBet: **${bet.toLocaleString()} BCoins**`)
+    .setDescription(`**${cfg.mines} mines** hidden across 12 tiles. Click to reveal!\nBet: **${bet.toLocaleString()} BCoins**`)
     .addFields(
       { name: "Revealed Safe", value: `${safe}`, inline: true },
       { name: "Multiplier",    value: `×${mult.toFixed(2)}`, inline: true },

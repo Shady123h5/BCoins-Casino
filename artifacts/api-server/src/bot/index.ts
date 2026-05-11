@@ -17,6 +17,7 @@ import * as mines from "./commands/mines.js";
 import * as towers from "./commands/towers.js";
 import * as owner from "./commands/owner.js";
 import * as give from "./commands/give.js";
+import * as removebal from "./commands/removebal.js";
 import * as turnoff from "./commands/turnoff.js";
 import * as help from "./commands/help.js";
 
@@ -34,6 +35,7 @@ const commands: Command[] = [
   towers,
   owner,
   give,
+  removebal,
   turnoff,
   help,
 ];

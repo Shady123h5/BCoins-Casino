@@ -1,0 +1,52 @@
+name: BCoins Casino Bot — 24/7
+
+on:
+  schedule:
+    # Restart every 5 hours (GitHub Actions hard-kills jobs at 6h)
+    - cron: "0 */5 * * *"
+  workflow_dispatch: # allow manual start from the Actions tab
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to commit bcoin-data.json back
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm --filter @workspace/api-server run build
+
+      - name: Run bot (4 h 55 min, then graceful stop)
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          OWNER_SECRET_KEY: ${{ secrets.OWNER_SECRET_KEY }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          PORT: "8080"
+        # timeout exits with code 124 — treat that as success so the
+        # next step always runs and data is always saved
+        run: timeout 17700 node artifacts/api-server/dist/index.cjs || true
+
+      - name: Persist bot data to repo
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bcoin-data.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "chore: persist bot data [skip ci]"
+          git push || true
