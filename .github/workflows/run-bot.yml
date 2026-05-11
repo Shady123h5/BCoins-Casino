@@ -1,10 +1,14 @@
 name: BCoins Casino Bot — 24/7
 
 on:
+  # Triggered by the keepalive watchdog and self-trigger
+  repository_dispatch:
+    types: [start-bot]
+  # Manual start from the Actions tab
+  workflow_dispatch:
+  # Hard fallback — fires every 6 h even if everything else fails
   schedule:
-    # Safety-net cron — fires every 6 h in case self-trigger fails
     - cron: "0 */6 * * *"
-  workflow_dispatch: # manual start from the Actions tab
 
 jobs:
   run-bot:
@@ -12,7 +16,6 @@ jobs:
     timeout-minutes: 360
     permissions:
       contents: write
-      actions: write
 
     steps:
       - name: Checkout (pulls latest bcoin-data.json)
@@ -32,28 +35,28 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
-      - name: Build
+      - name: Build bot
         run: pnpm --filter @workspace/api-server run build
 
-      - name: Run bot (5 h 45 min then stop cleanly)
+      - name: Run bot (5 h 45 min, then stop cleanly)
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           OWNER_SECRET_KEY: ${{ secrets.OWNER_SECRET_KEY }}
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           PORT: "8080"
-        # timeout exits 124 → treat as success so next steps always run
+        # timeout exits 124 → || true makes the step pass so data is always saved
         run: timeout 20700 node artifacts/api-server/dist/index.cjs || true
 
-      - name: Trigger next run immediately (needs PAT_TOKEN secret)
-        continue-on-error: true   # falls back to cron if PAT_TOKEN not set
-        env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+      - name: Self-trigger next run via repository_dispatch
         run: |
-          gh workflow run run-bot.yml \
-            --repo "${{ github.repository }}" \
-            --ref main
+          curl -s -X POST \
+            -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/dispatches" \
+            -d '{"event_type":"start-bot"}'
+        continue-on-error: true   # keepalive.yml is the real safety net
 
       - name: Save bot data back to repo
         run: |

@@ -1,20 +1,36 @@
-name: Keep-Alive Ping
+name: Keepalive — Restart Bot if Down
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Runs every hour — checks if the bot is alive, fires it up if not
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 jobs:
-  ping:
+  watchdog:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Ping bot server
+      - name: Check if bot is running, restart if not
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.BOT_URL }}/api/healthz" --max-time 10 || echo "000")
-          echo "Status: $STATUS"
-          if [ "$STATUS" != "200" ]; then
-            echo "Warning: server returned $STATUS"
+          RUNNING=$(curl -s \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/run-bot.yml/runs?status=in_progress&per_page=5" \
+            | python3 -c "import sys,json; data=json.load(sys.stdin); print(data['total_count'])")
+
+          echo "Active bot runs: $RUNNING"
+
+          if [ "$RUNNING" -eq "0" ]; then
+            echo "Bot is DOWN — restarting via repository_dispatch..."
+            curl -s -X POST \
+              -H "Authorization: token $GH_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/dispatches" \
+              -d '{"event_type":"start-bot"}'
+            echo "Restart triggered."
           else
-            echo "Bot is alive!"
+            echo "Bot is running. All good."
           fi
