@@ -1,4 +1,4 @@
-name: BCoins Casino Bot — 24/7 (Precision-Fix)
+name: BCoins Casino Bot — 24/7 (Final-MJS-Fix)
 
 on:
   workflow_dispatch:
@@ -40,13 +40,11 @@ jobs:
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           PORT: "8080"
         run: |
-          # 1. Target the specific artifacts directory from your debug log
-          # We look for any .js or .cjs file inside the api-server/dist folder
-          BOT_PATH=$(find artifacts/api-server/dist -name "*.js" -o -name "*.cjs" | head -n 1)
+          # 1. Target the .mjs file discovered in your logs
+          BOT_PATH="artifacts/api-server/dist/index.mjs"
           
-          if [ -z "$BOT_PATH" ]; then
-            echo "!!! ERROR: No JS/CJS files found in artifacts/api-server/dist"
-            echo "Actual content of that folder:"
+          if [ ! -f "$BOT_PATH" ]; then
+            echo "!!! ERROR: $BOT_PATH does not exist."
             ls -R artifacts/api-server/dist
             exit 1
           fi
@@ -58,10 +56,13 @@ jobs:
           
           while [ "$(date +%s)" -lt "$END" ]; do
             echo "==> [$(date -u)] Starting bot..."
+            
+            # Start the bot. Node handles .mjs files natively.
             node "$BOT_PATH" || echo "==> Bot exited (restarting...)"
             
             REMAINING=$(( END - $(date +%s) ))
             if [ "$REMAINING" -gt 5 ]; then
+              echo "==> Restarting in 5 seconds... ($REMAININGs left)"
               sleep 5
             else
               break
