@@ -1,0 +1,11 @@
+{
+  "users": {
+    "927629155355492362": {
+      "balance": 100,
+      "totalWon": 0,
+      "totalLost": 0,
+      "gamesPlayed": 0
+    }
+  },
+  "winProbability": 0.5
+}
